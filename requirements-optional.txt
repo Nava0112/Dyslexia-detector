@@ -1,0 +1,2 @@
+# Optional line segmentation enhancement. The API uses OpenCV when Kraken is absent.
+kraken>=5,<6
