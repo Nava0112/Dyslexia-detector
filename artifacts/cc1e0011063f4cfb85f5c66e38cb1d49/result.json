@@ -1,0 +1,20 @@
+{
+  "job_id": "cc1e0011063f4cfb85f5c66e38cb1d49",
+  "status": "screening_complete",
+  "screening_result": "lower_risk",
+  "dyslexic": false,
+  "screening_score": 0.2333,
+  "decision_threshold": 0.6,
+  "disclaimer": "This is a research screening result, not a medical diagnosis.",
+  "line_count": 2,
+  "crop_count": 105,
+  "class_counts": {
+    "Corrected": 25,
+    "Normal": 68,
+    "Reversal": 12
+  },
+  "artifacts": {
+    "annotated_image": "/artifacts/cc1e0011063f4cfb85f5c66e38cb1d49/annotated.png"
+  },
+  "processing_time_ms": 1200.96
+}

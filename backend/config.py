@@ -7,7 +7,7 @@ ARTIFACT_DIR = Path(os.getenv("DYSLEXIA_ARTIFACT_DIR", ROOT_DIR / "artifacts"))
 CHECKPOINT_PATH = Path(
     os.getenv(
         "DYSLEXIA_CHECKPOINT",
-        ROOT_DIR / "outputs_dyslexia_model_d_v4_debugged" / "model_d_v4_best.pth",
+        ROOT_DIR / "model_d_v4_best.pth.zip",
     )
 )
 

@@ -62,46 +62,95 @@ class FeatureAlign(nn.Module):
 
 
 class MultiLevelFusion(nn.Module):
-    def __init__(self):
+    def __init__(self, channels: tuple[int, int, int] = (40, 40, 96), fusion_channels: int = 128):
         super().__init__()
-        self.align = nn.ModuleList([FeatureAlign(channels) for channels in (40, 40, 96)])
+        self.align1 = FeatureAlign(channels[0], fusion_channels)
+        self.align2 = FeatureAlign(channels[1], fusion_channels)
+        self.align3 = FeatureAlign(channels[2], fusion_channels)
         self.fuse = nn.Sequential(
-            nn.Conv2d(384, 256, 1, bias=False), nn.BatchNorm2d(256), nn.Hardswish(inplace=True),
-            nn.Conv2d(256, 128, 3, padding=1, bias=False), nn.BatchNorm2d(128), nn.Hardswish(inplace=True),
+            nn.Conv2d(fusion_channels * 3, fusion_channels * 2, 1, bias=False),
+            nn.BatchNorm2d(fusion_channels * 2),
+            nn.Hardswish(inplace=True),
+            nn.Conv2d(fusion_channels * 2, fusion_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(fusion_channels),
+            nn.Hardswish(inplace=True),
         )
-        self.cbam = CBAM(128)
-        self.residual = nn.Sequential(nn.Conv2d(384, 128, 1, bias=False), nn.BatchNorm2d(128))
+        self.cbam = CBAM(fusion_channels)
+        self.residual = nn.Sequential(
+            nn.Conv2d(fusion_channels * 3, fusion_channels, 1, bias=False),
+            nn.BatchNorm2d(fusion_channels),
+        )
 
     def forward(self, features):
-        target_size = features[0].shape[-2:]
-        merged = torch.cat([layer(feature, target_size) for layer, feature in zip(self.align, features)], 1)
+        f1, f2, f3 = features
+        target_size = f1.shape[-2:]
+        merged = torch.cat(
+            [
+                self.align1(f1, target_size),
+                self.align2(f2, target_size),
+                self.align3(f3, target_size),
+            ],
+            1,
+        )
         return F.relu(self.cbam(self.fuse(merged)) + self.residual(merged), inplace=True)
 
 
 class SpatialPyramidPooling(nn.Module):
+    def __init__(self, channels: int = 128, pool_sizes: tuple[int, ...] = (1, 2, 4)):
+        super().__init__()
+        self.pool_sizes = pool_sizes
+
     def forward(self, x):
-        return torch.cat([F.adaptive_avg_pool2d(x, (size, size)).flatten(1) for size in (1, 2, 4)], 1)
+        return torch.cat(
+            [F.adaptive_avg_pool2d(x, (size, size)).flatten(1) for size in self.pool_sizes],
+            1,
+        )
+
+
+class StandardInceptionBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        branch_channels = (out_channels // 3, out_channels // 3, out_channels - 2 * (out_channels // 3))
+        self.branch1 = nn.Sequential(
+            nn.Conv2d(in_channels, branch_channels[0], 1, bias=False),
+            nn.BatchNorm2d(branch_channels[0]),
+            nn.Hardswish(inplace=True),
+        )
+        self.branch3 = nn.Sequential(
+            nn.Conv2d(in_channels, branch_channels[1], 3, padding=1, bias=False),
+            nn.BatchNorm2d(branch_channels[1]),
+            nn.Hardswish(inplace=True),
+        )
+        self.branch5 = nn.Sequential(
+            nn.Conv2d(in_channels, branch_channels[2], 5, padding=2, bias=False),
+            nn.BatchNorm2d(branch_channels[2]),
+            nn.Hardswish(inplace=True),
+        )
+
+    def forward(self, x):
+        return torch.cat([self.branch1(x), self.branch3(x), self.branch5(x)], 1)
 
 
 class InceptionSEResidual(nn.Module):
-    def __init__(self, channels: int):
+    def __init__(self, channels: int, ratio: int = 8):
         super().__init__()
-        parts = (channels // 3, channels // 3, channels - 2 * (channels // 3))
-        self.branches = nn.ModuleList([
-            nn.Sequential(nn.Conv2d(channels, parts[0], 1, bias=False), nn.BatchNorm2d(parts[0]), nn.Hardswish(inplace=True)),
-            nn.Sequential(nn.Conv2d(channels, parts[1], 3, padding=1, bias=False), nn.BatchNorm2d(parts[1]), nn.Hardswish(inplace=True)),
-            nn.Sequential(nn.Conv2d(channels, parts[2], 5, padding=2, bias=False), nn.BatchNorm2d(parts[2]), nn.Hardswish(inplace=True)),
-        ])
-        reduced = max(channels // 8, 1)
-        self.se = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Conv2d(channels, reduced, 1), nn.ReLU(inplace=True), nn.Conv2d(reduced, channels, 1), nn.Sigmoid())
+        self.inception = StandardInceptionBlock(channels, channels)
+        reduced = max(channels // ratio, 1)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.se = nn.Sequential(
+            nn.Conv2d(channels, reduced, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(reduced, channels, 1),
+            nn.Sigmoid(),
+        )
 
     def forward(self, x):
-        y = torch.cat([branch(x) for branch in self.branches], 1)
-        return F.hardswish(y * self.se(y) + x, inplace=True)
+        y = self.inception(x)
+        return F.hardswish(y * self.se(self.pool(y)) + x, inplace=True)
 
 
 class ModelDV4(nn.Module):
-    def __init__(self, num_classes: int = 3):
+    def __init__(self, pretrained: bool = False, num_classes: int = 3):
         super().__init__()
         try:
             from torchvision.models import mobilenet_v3_small
@@ -114,8 +163,8 @@ class ModelDV4(nn.Module):
         self.inception_40_a = InceptionSEResidual(40)
         self.inception_40_b = InceptionSEResidual(40)
         self.inception_96 = InceptionSEResidual(96)
-        self.fusion = MultiLevelFusion()
-        self.spp = SpatialPyramidPooling()
+        self.fusion = MultiLevelFusion(channels=(40, 40, 96), fusion_channels=128)
+        self.spp = SpatialPyramidPooling(channels=128, pool_sizes=(1, 2, 4))
         self.classifier = nn.Sequential(nn.Linear(128 * 21, 1024), nn.Hardswish(inplace=True), nn.Dropout(0.5), nn.Linear(1024, num_classes))
 
     def forward(self, x):
@@ -140,7 +189,7 @@ def preprocess_crop(crop: np.ndarray) -> torch.Tensor:
     resized = cv2.resize(square, (IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_AREA)
     enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(resized)
     normalized = (enhanced.astype(np.float32) / 255.0 - 0.5) / 0.5
-    return torch.from_numpy(normalized).unsqueeze(0)
+    return torch.from_numpy(normalized).unsqueeze(0).unsqueeze(0)
 
 
 class Classifier:
@@ -157,7 +206,7 @@ class Classifier:
     def predict(self, crops):
         if not crops:
             return []
-        batch = torch.stack([preprocess_crop(crop.image).squeeze(0) for crop in crops]).to(self.device)
+        batch = torch.cat([preprocess_crop(crop.image) for crop in crops], dim=0).to(self.device)
         with torch.inference_mode():
             probabilities = torch.softmax(self.model(batch), dim=1).cpu().numpy()
         results = []
