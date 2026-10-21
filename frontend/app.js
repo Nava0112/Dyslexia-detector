@@ -1,3 +1,5 @@
+import { LlmGuidancePanel } from "./LlmGuidancePanel.js";
+
 const $ = (selector) => document.querySelector(selector);
 const fileInput = $("#file-input");
 const dropzone = $("#dropzone");
@@ -6,6 +8,7 @@ const analyzeButton = $("#analyze-button");
 const formError = $("#form-error");
 const preview = $("#file-preview");
 const serviceStatus = $("#service-status");
+const guidancePanel = new LlmGuidancePanel($("#guidance-panel"));
 let selectedFile = null;
 
 function showError(message) {
@@ -110,6 +113,7 @@ function renderResults(data) {
     $("#download-image").classList.remove("disabled");
   }
   $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
+  guidancePanel.connect(data);
 }
 
 async function analyze() {
