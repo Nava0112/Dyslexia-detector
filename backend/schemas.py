@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -15,3 +15,14 @@ class AnalysisResponse(BaseModel):
     class_counts: dict[str, int]
     artifacts: dict[str, str]
     processing_time_ms: float = Field(ge=0)
+
+
+class GuidanceRequest(BaseModel):
+    status: str
+    screening_score: Optional[float] = Field(default=None, ge=0, le=1)
+    activeThreshold: float = Field(ge=0, le=1)
+    crop_count: int = Field(ge=0)
+    line_count: int = Field(ge=0)
+    class_counts: dict[str, int]
+    age_group: Literal["Child", "Teen", "Adult"] = "Child"
+    difficulty: Literal["Gentle", "Standard", "Challenge"] = "Standard"

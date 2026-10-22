@@ -15,7 +15,8 @@ from backend.config import (
     MAX_UPLOAD_BYTES,
 )
 from backend.pipeline import AnalysisPipeline
-from backend.schemas import AnalysisResponse
+from backend.guidance import GuidanceError, create_guidance
+from backend.schemas import AnalysisResponse, GuidanceRequest
 
 
 app = FastAPI(
@@ -84,6 +85,22 @@ async def analyze(file: UploadFile = File(...)):
         return pipeline.analyze(image, uuid.uuid4().hex)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/guidance")
+async def guidance(request: GuidanceRequest):
+    counts = request.class_counts
+    required_classes = {"Normal", "Corrected", "Reversal"}
+    if set(counts) != required_classes or any(value < 0 for value in counts.values()):
+        raise HTTPException(
+            status_code=422,
+            detail="class_counts must contain exactly Normal, Corrected, and Reversal.",
+        )
+    try:
+        content = create_guidance(request.model_dump())
+    except GuidanceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"content": content}
 
 
 @app.get("/artifacts/{job_id}/{filename}")
