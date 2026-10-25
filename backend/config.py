@@ -3,6 +3,7 @@ import os
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+PORT = 2000
 ARTIFACT_DIR = Path(os.getenv("DYSLEXIA_ARTIFACT_DIR", ROOT_DIR / "artifacts"))
 CHECKPOINT_PATH = Path(
     os.getenv(

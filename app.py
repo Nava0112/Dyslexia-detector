@@ -1,8 +1,10 @@
+import os
 import uuid
 from pathlib import Path
 
 import cv2
 import numpy as np
+import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,7 @@ from backend.config import (
     ARTIFACT_DIR,
     CHECKPOINT_PATH,
     MAX_UPLOAD_BYTES,
+    PORT,
 )
 from backend.pipeline import AnalysisPipeline
 from backend.guidance import GuidanceError, create_guidance
@@ -113,3 +116,12 @@ def artifact(job_id: str, filename: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found.")
     return FileResponse(path)
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "app:app",
+        host="127.0.0.1",
+        port=int(os.getenv("PORT", str(PORT))),
+        reload=True,
+    )
