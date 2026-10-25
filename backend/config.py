@@ -28,3 +28,4 @@ DECISION_THRESHOLD = 0.35
 MINIMUM_CROPS = 5
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+SEGMENTATION_DEBUG = os.getenv("DYSLEXIA_SEGMENTATION_DEBUG", "").lower() in ("1", "true", "yes")

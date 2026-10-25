@@ -1,0 +1,10 @@
+{
+  "lines_detected": 16,
+  "median_line_height": 46.0,
+  "total_initial_components": 958,
+  "grouped_fragments": 80,
+  "split_components": 19,
+  "rejected_components": 320,
+  "final_crops_count": 414,
+  "warnings": []
+}

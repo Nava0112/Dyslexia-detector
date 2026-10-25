@@ -15,6 +15,7 @@ class AnalysisResponse(BaseModel):
     class_counts: dict[str, int]
     artifacts: dict[str, str]
     processing_time_ms: float = Field(ge=0)
+    segmentation_metadata: Optional[dict] = None
 
 
 class GuidanceRequest(BaseModel):

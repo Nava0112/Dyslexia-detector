@@ -1,13 +1,20 @@
 import json
 import time
 from pathlib import Path
+from typing import Optional
 
 import cv2
 import numpy as np
 
 from .config import (
-    ARTIFACT_DIR, CLASS_COLORS, CLASS_NAMES, CORRECTED_WEIGHT, DECISION_THRESHOLD,
-    MINIMUM_CROPS, REVERSAL_WEIGHT,
+    ARTIFACT_DIR,
+    CLASS_COLORS,
+    CLASS_NAMES,
+    CORRECTED_WEIGHT,
+    DECISION_THRESHOLD,
+    MINIMUM_CROPS,
+    REVERSAL_WEIGHT,
+    SEGMENTATION_DEBUG,
 )
 from .model import Classifier
 from .segmentation import extract_crops
@@ -17,9 +24,15 @@ class AnalysisPipeline:
     def __init__(self, checkpoint_path: Path):
         self.classifier = Classifier(checkpoint_path)
 
-    def analyze(self, image: np.ndarray, job_id: str) -> dict:
+    def analyze(self, image: np.ndarray, job_id: str, debug: Optional[bool] = None) -> dict:
         started = time.perf_counter()
-        crops, line_boxes, _ = extract_crops(image)
+        output_dir = ARTIFACT_DIR / job_id
+        output_dir.mkdir(parents=True, exist_ok=False)
+
+        is_debug = SEGMENTATION_DEBUG if debug is None else debug
+        debug_dir = output_dir / "segmentation_debug" if is_debug else None
+
+        crops, line_boxes, debug_info = extract_crops(image, debug=is_debug, debug_dir=debug_dir)
         predictions = self.classifier.predict(crops)
         counts = {name: sum(row["predicted_class"] == name for row in predictions) for name in CLASS_NAMES}
         usable = len(predictions)
@@ -32,8 +45,6 @@ class AnalysisPipeline:
             dyslexic = score >= DECISION_THRESHOLD
             status = "screening_complete"
 
-        output_dir = ARTIFACT_DIR / job_id
-        output_dir.mkdir(parents=True, exist_ok=False)
         annotated = image.copy()
         for row in predictions:
             color_rgb = CLASS_COLORS[row["predicted_class"]]
@@ -42,13 +53,24 @@ class AnalysisPipeline:
         annotated_path = output_dir / "annotated.png"
         if not cv2.imwrite(str(annotated_path), annotated):
             raise RuntimeError("Failed to write annotated result.")
+
+        artifacts_dict = {"annotated_image": f"/artifacts/{job_id}/annotated.png"}
+        clean_metadata = {k: v for k, v in debug_info.items() if k != "cleaned_mask"}
+
         result = {
-            "job_id": job_id, "status": status, "screening_result": "elevated_risk" if dyslexic else ("lower_risk" if dyslexic is False else None),
-            "dyslexic": dyslexic, "screening_score": score, "decision_threshold": DECISION_THRESHOLD,
+            "job_id": job_id,
+            "status": status,
+            "screening_result": "elevated_risk" if dyslexic else ("lower_risk" if dyslexic is False else None),
+            "dyslexic": dyslexic,
+            "screening_score": score,
+            "decision_threshold": DECISION_THRESHOLD,
             "disclaimer": "This is a research screening result, not a medical diagnosis.",
-            "line_count": len(line_boxes), "crop_count": usable, "class_counts": counts,
-            "artifacts": {"annotated_image": f"/artifacts/{job_id}/annotated.png"},
+            "line_count": len(line_boxes),
+            "crop_count": usable,
+            "class_counts": counts,
+            "artifacts": artifacts_dict,
             "processing_time_ms": round((time.perf_counter() - started) * 1000, 2),
+            "segmentation_metadata": clean_metadata,
         }
         (output_dir / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         return result
