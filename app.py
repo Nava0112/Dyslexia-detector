@@ -1,4 +1,6 @@
+import logging
 import os
+import threading
 import uuid
 from pathlib import Path
 
@@ -13,10 +15,12 @@ from fastapi.staticfiles import StaticFiles
 from backend.config import (
     ALLOWED_CONTENT_TYPES,
     ARTIFACT_DIR,
-    CHECKPOINT_PATH,
     MAX_UPLOAD_BYTES,
     PORT,
+    ConfigurationError,
+    get_active_model_config,
 )
+from backend.model import ModelLoadError, require_checkpoint, resolve_device
 from backend.pipeline import AnalysisPipeline
 from backend.guidance import GuidanceError, create_guidance
 from backend.schemas import AnalysisResponse, GuidanceRequest
@@ -34,10 +38,23 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+logger = logging.getLogger(__name__)
 pipeline: AnalysisPipeline | None = None
+pipeline_lock = threading.Lock()
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+
+def get_pipeline() -> AnalysisPipeline:
+    """Load the selected model once and share it across requests."""
+    global pipeline
+    if pipeline is None:
+        with pipeline_lock:
+            if pipeline is None:
+                pipeline = AnalysisPipeline(get_active_model_config())
+    return pipeline
+
 
 @app.get("/")
 def home():
@@ -50,11 +67,14 @@ def health():
 
 @app.get("/ready")
 def ready():
-    if not CHECKPOINT_PATH.is_file():
-        raise HTTPException(
-            status_code=503,
-            detail=f"Model checkpoint not found: {CHECKPOINT_PATH}",
-        )
+    try:
+        config = get_active_model_config()
+        require_checkpoint(config)
+        resolve_device()
+    except (ConfigurationError, ModelLoadError) as exc:
+        logger.error("Model readiness check failed: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    logger.info("Ready with model id=%s", config["model_id"])
     return {"status": "ready"}
 
 
@@ -78,15 +98,15 @@ async def analyze(file: UploadFile = File(...)):
             detail="The uploaded file is not a readable image.",
         )
 
-    global pipeline
-    if pipeline is None:
-        try:
-            pipeline = AnalysisPipeline(CHECKPOINT_PATH)
-        except (FileNotFoundError, RuntimeError) as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
-        return pipeline.analyze(image, uuid.uuid4().hex)
+        active_pipeline = get_pipeline()
+    except (ConfigurationError, ModelLoadError) as exc:
+        logger.exception("Selected model is unavailable")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
+        return active_pipeline.analyze(image, uuid.uuid4().hex)
     except (RuntimeError, ValueError) as exc:
+        logger.warning("Analysis failed: %s", exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

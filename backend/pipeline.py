@@ -1,6 +1,5 @@
 import json
 import time
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -14,8 +13,8 @@ from .segmentation import extract_crops
 
 
 class AnalysisPipeline:
-    def __init__(self, checkpoint_path: Path):
-        self.classifier = Classifier(checkpoint_path)
+    def __init__(self, model_config: dict | None = None):
+        self.classifier = Classifier(model_config)
 
     def analyze(self, image: np.ndarray, job_id: str) -> dict:
         started = time.perf_counter()
