@@ -1,10 +1,13 @@
 from dataclasses import dataclass
+import logging
 
 import cv2
 import numpy as np
 from PIL import Image
 
 from .config import MIN_AREA, MIN_HEIGHT, PADDING
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -34,9 +37,14 @@ def segment_lines(gray: np.ndarray, pil_image: Image.Image | None = None) -> lis
 
         pil_image = pil_image or Image.fromarray(gray)
         segmented = pageseg.segment(binarization.nlbin(pil_image))
+        lines = getattr(segmented, "lines", None)
+        if lines is None and isinstance(segmented, dict):
+            lines = segmented.get("boxes", [])
+        if lines is None:
+            raise TypeError("Kraken returned an unsupported segmentation result.")
         boxes = []
-        for line in segmented.lines:
-            x1, y1, x2, y2 = map(int, line.bbox)
+        for line in lines:
+            x1, y1, x2, y2 = map(int, getattr(line, "bbox", line))
             box = (max(0, x1), max(0, y1), min(width, x2), min(height, y2))
             if box[2] > box[0] and box[3] > box[1]:
                 boxes.append(box)
@@ -45,7 +53,10 @@ def segment_lines(gray: np.ndarray, pil_image: Image.Image | None = None) -> lis
     except ImportError:
         pass
     except Exception as exc:
-        raise RuntimeError("Kraken line segmentation failed.") from exc
+        logger.warning(
+            "Kraken line segmentation failed; falling back to OpenCV: %s",
+            exc,
+        )
 
     threshold = cv2.threshold(
         gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
